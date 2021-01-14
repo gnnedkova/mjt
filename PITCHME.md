@@ -9033,4 +9033,2412 @@ isInterrupted() // не изчиства флага (не-статичен)
 
 
 
+## Многонишково програмиране с Java (част II)
+
+_16.12.2020_
+
+---
+
+#### Предната лекция говорихме за:
+
+@ul
+
+- Concurrent и паралелно изпълнение на програми
+- Многонишково програмиране (Multithreading)
+    - Нишки и техния жизнен цикъл
+    - Атомарни типове данни
+    - Комуникация и синхронизиране между нишки
+
+@ulend
+
+---
+
+#### Днес ще разгледаме:
+
+@ul
+
+- Thread pools / Executors API
+- Concurrent колекции
+- Мрежово програмиране
+
+@ulend
+
+---
+
+#### Runnable vs. Callable
+
+```java
+// java.lang
+@FunctionalInterface
+public interface Runnable {
+
+    public abstract void run();
+
+}
+
+// java.util.concurrent
+@FunctionalInterface
+public interface Callable<V> {
+
+    V call() throws Exception;
+
+}
+```
+
+---
+
+#### Future<V>
+
+```java
+// java.util.concurrent
+public interface Future<V> {
+
+    boolean cancel(boolean mayInterruptIfRunning);
+
+    boolean isCancelled();
+
+    boolean isDone();
+
+    V get() throws InterruptedException, ExecutionException;
+
+    V get(long timeout, TimeUnit unit)
+        throws InterruptedException, ExecutionException,
+               TimeoutException;
+
+}
+```
+
+---
+
+#### Преизползване на нишки
+
+---
+
+#### Thread pool (Executor)
+
+<small>
+- Kонцепция в многонишковото програмиране, при която „рециклираме“ нишките след края на тяхното изпълнение, с цел оптимизация.
+- Отделните `Runnable` или `Callable` обекти се третират като „задачи“ и се трупат в опашка, и когато има свободни нишки в pool-а, те изпълняват задачите, на базата на зададени правила.
+
+</small>
+
+![test](https://upload.wikimedia.org/wikipedia/commons/0/0c/Thread_pool.svg)
+
+---
+
+#### Executors API
+
+```java
+// централен интерфейс
+java.util.concurrent.Executor
+void execute(Runnable command)
+
+// добавя възможност и за изпълнение на Callable обекти,
+// които, за разлика от Runnable, могат да върнат резултат
+java.util.concurrent.ExecutorService
+<T> Future<T> submit(Callable<T> task)
+
+// задачите могат да се пускат след опредено закъснение
+// или периодично на зададен интервал
+java.util.concurrent.ScheduledExecutorService
+ScheduledFuture schedule(Runnable r,long delay, TimeUnit tu)
+ScheduledFuture scheduleAtFixedRate(Runnable r, long delay, 
+                                    long period, TimeUnit tu)
+```
+
+---
+
+#### Създаване на Executor
+
+```java
+// предоставя статични factory методи за създаването на pools от нишки
+java.util.concurrent.Executors
+
+// pool-ът ще се състои само от една нишка, следователно
+// задачите ще се изпълняват последователно
+static ExecutorService newSingleThreadExecutor()
+
+// създава pool, който ще се състои от фиксиран брой нишки.
+// Ако в опашката има повече задачи, отколкото налични нишки,
+// задачите не се обработват, докато не се освободи нишка
+static ExecutorService newFixedThreadPool(int n)
+
+// създава pool от нишки, който ще преизползва нишките,
+// ако има налични, в противен случай ще направи нова.
+// Нишките, които не се използвани през последната минута,
+// ще бъдат премахнати
+static ExecutorService newCachedThreadPool()
+
+// pool, който изпълнява задачи периодично или със закъснение
+static ScheduledExecutorService newScheduledThreadPool(int size)
+```
+
+---
+
+#### Спиране на Thread pool
+
+Executor обект винаги трябва да бъде експлицитно спрян с метода `shutdown()`
+
+---
+
+#### Thread-safe колекции: Синхронизирани колекции
+
+- Collections API предоставя имплементации на няколко синхронизирани колекции като `
+Vector` и `Hashtable`
+- `java.util.Collections` предоставя factory метод, с който можем да създадем synchronized колекция от съществуваща обикновена колекция
+- Синхронизираните колекции обаче не са достатъчно бързи при много едновременни ползватели и не предоставят възможност за атомарни операции
+
+<br/>
+
+```java
+static <T> Collection<T> synchronizedCollection(Collection<T> c)
+```
+
+---
+
+#### Thread-safe колекции: Concurrent колекции
+
+- намират се в пакета `java.util.concurrent`
+- създадени са специално за работа в concurrent среда
+- добавят възможности за
+  - Lock-free паралелен достъп
+  - Fail-safe итератори
+  - Атомарни операции (например, `putIfAbsent()`)
+
+---
+
+#### `CopyOnWriteArrayList`
+
+- Алтернатива на синхронизираните имплементации на `ArrayList`
+- Позволява lock-free паралелно четене
+- “Fail-safe snapshot” итератор
+- Всяка модификация предизвиква копиране на масива
+- Атомарни операции: `boolean addIfAbsent(E e);`
+- Използването на тази структура е подходящо, само когато броят на четенията от масива значително надвишава броя на модификациите. В противен случай, структурата е изключително неефективна
+
+--- 
+
+#### `ConcurrentHashMap`
+
+- Алтернатива на синхронизираните версии на `java.util.HashMap`
+- Паралелен lock-free достъп за четене
+- Паралелен (но лимитиран) достъп за писане 
+- Fail-safe и “Weakly consistent“ итератор
+- Атомарни операции: `V putIfAbsent(K key, V value)`
+- Най-популярната колекция от `java.util.concurrent` библиотеката, почти винаги е подходяща да се използва за замяната на старите синхронизирани варианти на `HashMap`
+
+--- 
+
+#### `BlockingQueue`
+
+Имплементация на блокираща опашка (“Producer-Consumer” опашка).
+Блокира, когато:
+- опашката е празна и някой се опитва да чете от нея. При първи запис, бива нотифицирана
+- oпашката е пълна и някой се опитва да пише в нея. При първо четене, бива нотифицирана
+- `ArrayBlockingQueue` – основна имплементация. Опашката пази елементите си в масив, който не може да променя размера си.
+
+<br/>
+
+```java
+BlockingQueue<String> queue = new ArrayBlockingQueue<>(4);
+```
+
+---
+
+#### Multi-threading теми извън обхвата на курса
+
+- Visibility & stale data. Volatile variables. Nonatomic 64-bit operations
+- Explicit locks
+- Synchronizers: Latches, Semaphores, Barriers
+
+---
+
+![Java Concurrency in Practice](images/09.6-java-concurrency-in-practice.jpg)
+
+---
+
+![dogs-meme](https://cdn-images-1.medium.com/max/1600/0*9LJYn6Tlc8q3qA3U.png)
+
+---
+
+## Мрежово програмиране с Java
+
+_16.12.2020_
+
+![Networking](images/10.0-networking.jpg)
+
+---
+
+#### Теми, които ще разгледаме
+
+- Мрежови модели: клиент-сървър, peer-to-peer
+- Мрежови протоколи
+   - IP, UDP, TCP
+- Мрежова комуникация в Java
+    - blocking
+    - non-blocking
+- Network scalability
+
+---
+
+#### Модел Клиент-Сървър
+
+<small>Клиент-сървър е разпределен изчислителен модел, при който част от задачите се разпределят между доставчиците на ресурси или услуги, наречени сървъри и консуматорите на услуги, наречени клиенти</small>
+
+![Client-Server](images/10.4-client-server.png)
+
+---
+
+#### Модел Peer-to-peer
+
+<small>
+Peer-to-peer е разпределен архитектурен модел на приложение, при който задачите се разпределят по еднакъв начин между всички участници (peer, node). Всеки участник е едновременно и клиент, и сървър.</small>
+
+![Peer-to-Peer](images/10.5-peer-to-peer.png)
+
+---
+
+#### Видове клиенти
+
+- Според наличната функционалност в клиента:
+    - Rich клиенти
+    - Thin клиенти
+- Според семантиката (протокола):
+    - Web клиенти – Браузъри (Chrome, Firefox, IE).
+    - Mail клиенти – POP/SMTP клиенти (MS Outlook, Lotus notes).
+    - FTP клиенти – Total Commander, Filezilla, WinSCP.
+    - …
+
+---
+
+#### Видове сървъри
+
+- Файл сървър (Windows, Samba, UNIX NFS, OpenAFS)
+- DB сървър (MySQL, PostgreSQL, Oracle, MS SQL Server, Mongo DB)
+- Mail сървър (MS Exchange, GMail)
+- Name сървър (DNS)
+- FTP сървър (ftpd, IIS)
+- Print сървър
+- Game сървър
+- Web сървър (Apache, GWS, MS IIS, nginx)
+- Application сървър (Tomcat, TomEE, GlassFish, JBoss)
+- ...
+
+---
+
+#### Предимства и недостатъци на Клиент-Сървър
+
+- Висока сигурност: контролът за достъп до данните се осъществява на едно място: сървъра
+- Консистентност на данните: всички клиенти в даден момент достъпват едни и същи данни
+- Промени в данните се разпространяват много бързо в мрежата: при първото извикване от клиент към сървъра
+- Single Point Of Failure (SPOF): ако сървърът е down, никой в мрежата не може да комуникира
+- Увеличаването на броя на клиентите води до намаляване на производителността
+- 70-95% от времето, през което работи, сървърът е idle
+
+---
+
+#### Предимства и недостатъци на Peer-to-Peer
+
+- Няма SPOF
+- Няма намаляване на производителността при увеличаване на броя на клиентите
+- Проблеми със сигурността: има копия на даните из цялата мрежа
+- Риск от умишлена промяна (подмяна) на съдържанието и различни версии на данните в различни възли на мрежата
+- Липса на контрол върху съдържанието и възможност за загуба на съдържание
+- Труден процес на поддръжка
+
+---
+
+#### Open Systems Interconnection (OSI) модел
+
+![OSI Model](images/10.1-osi-model.png)
+
+---
+
+#### OSI модел: мрежови протоколи
+
+<table style="font-size:0.5em; line-height=0.7em;">
+  <tr>
+    <th>#</th>
+    <th>Слой</th>
+    <th>Описание</th>
+    <th>Протоколи</th>
+  </tr>
+  <tr>
+    <td>7</td>
+    <td>Application</td>
+    <td>Позволява на потребителските приложения да заявяват услуги или информация, а на сървър приложенията — да се регистрират и предоставят услуги в мрежата.</td>
+    <td>DNS, FTP, HTTP, NFS, NTP, DHCP, SMTP, Telnet</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td>Presentation</td>
+    <td>Конвертиране, компресиране и криптиране на данни.</td>
+    <td>TLS/SSL</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>Session</td>
+    <td>Създаването, поддържането и терминирането на сесии. Сигурност. Логически портове.</td>
+    <td>Sockets</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>Transport</td>
+    <td>Грижи се за целостта на съобщенията, за пристигането им в точна последователност, потвърждаване за пристигане, проверка за загуби и дублиращи се съобщения.</td>
+    <td>TCP, UDP</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>Network</td>
+    <td>Управлява пакетите в мрежата. Рутиране. Фрагментация на данните. Логически адреси.</td>
+    <td>IPv4, IPv6, IPX, ICMP</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Data Link</td>
+    <td>Предаване на фреймове от един възел на друг. Управление на последователността на фреймовете. Потвърждения. Проверка за грешки. MAC.</td>
+    <td>ATM, X.25, DSL, IEEE 802.11</td>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td>Physical</td>
+    <td>Отговаря за предаването и приемането на неструктурирани потоци от данни по физическия носител. Кодиране/декодиране на данните. Свързване на физическия носител.</td>
+    <td>IEEE 802.11, IEEE 1394, Bluetooth</td>
+  </tr>
+</table>
+
+---
+
+#### java.net | Въведение
+
+<small>Пакетът `java.net` предоставя класове, които използват и работят на различни нива от OSI модела.</small>
+
+- Мрежов и data link слой
+    - класът `NetworkInterface` предоставя достъп до мрежовите адаптери на компютъра
+    - IP адреси - класът `InetAddress`
+- Транспортен слой
+    - TCP - класове `Socket` и `ServerSocket`
+    - UDP - класове `DatagramPacket`, `DatagramSocket` и `MulticastSocket`
+- Приложен слой
+    - класовете `URL` и `URLConnection` за достъпването на HTTP и FTP ресурси
+    - (от Java 11) класовете от пакета `java.net.http` за по-удобна работа с HTTP. Ще ги разгледаме на следващата лекция
+
+---
+
+#### java.net | Мрежови адаптери
+
+- Мрежовият адаптер осъществява връзката между компютърна система и мрежа
+- Мрежовите адаптери могат да бъдат физически или виртуални (софтуерни). Примери за виртуални са *loopback* интерфейсът и интерфейсите, създадени от виртуалните машини
+- Една система може да има повече от един физически и/или виртуален мрежови адаптер
+- Java предоставя достъп до всички мрежови адаптери чрез класа `java.net.NetworkInterface`
+
+---
+
+#### IP адрес
+
+- Всеки компютър, свързан към мрежа, се идентифицира с логически адрес
+- Най-разпространените протоколи за логически адреси в мрежата са IP (Internet Protocol) версия 4 и IP версия 6
+- Адресите в IPv4 представляват 32-битови числа, а в IPv6 - 128-битови
+
+<br/>
+
+![IP v4 v6](images/10.2-ipv4-ipv6.png)
+
+---
+
+#### Портове
+
+- В общия случай, компютърът има една физическа връзка към мрежата. По тази връзка се изпращат и получават данни от/за всички приложения. Портовете се използват, за да се знае кои данни за кое приложение са
+- Предадените данни по мрежата винаги съдържат в себе си информация за компютъра и порта, към които са насочени
+- Портовете се идентифицират с 16-битово число, което се използва от UDP и TCP протоколите, за да идентифицират за кое приложение са предназначени данните
+- Портовете могат да бъдат от номер 0 до номер 65 535
+- Портове с номера от 0 до 1023 са известни като *well-known ports*. За да се използват тези портове от вашето приложение, то трябва да се изпълнява с администраторски права
+
+---
+
+#### Адресиране в мрежата | `java.net.InetAddress`
+
+<small>
+- Инстанции се създават чрез статични методи на класа
+- С `NetworkInterface`, може да вземете списък с всички мрежови адаптери или точно определен
+
+</small>
+
+```java
+// създава инстанция по hostname или по текстово представяне на IP адрес
+InetAddress address = InetAddress.getByName​("www.google.com");
+System.out.println(address.getHostAddress()); // 172.217.169.164
+
+InetAddress address = InetAddress.getByName("62.44.101.138");
+System.out.println(address.getHostName()); // www.fmi.uni-sofia.bg
+System.out.println(address.isReachable(5_000)); // true
+InetAddress localhost = InetAddress.getLocalHost();
+
+Collections.list(NetworkInterface.getNetworkInterfaces())
+           .stream()
+           .forEach(n -> {
+                System.out.println("Disp. name: " + n.getDisplayName());
+                System.out.println("Name: " + n.getName());
+           });
+```
+
+---
+
+#### Сокети (sockets)
+
+- UDP и TCP се имплементират чрез *сокети* (*sockets*)
+- Сокетите представляват крайните точки на двупосочна мрежова връзка (connection) между две приложения
+- Всеки сокет се идентифицира чрез комбинация от IP адрес и номер на порт
+
+---
+
+#### UDP протокол
+
+- позволява на приложенията да пращат съобщения, наречени *datagrams*, чрез прост, connection-less модел на комуникация
+- няма *handshake* между двете страни на комуникацията, в следствие на което няма гаранция за доставка на съобщенията и за запазване на реда им
+
+---
+
+#### UDP протокол
+
+- Datagram се представя от класа `java.net.DatagramPacket`
+- `DatagramSocket` представлява connection-less сокет за пращане и получаване на datagram пакети чрез методите си `send` и `receive`
+
+---
+
+#### TCP протокол
+
+- Надгражда IP протокола, затова също се нарича TCP/IP ("TCP over IP")
+- Предава данните по надежден начин, т.е. с проверка за грешки, с гаранция за доставка и със запазване на реда на пакетите
+
+---
+
+#### TCP протокол
+
+- Имплементира се със сокети - класовете `ServerSocket` и `Socket`, позволяващи пращането и получаването на съобщения между две приложения: сървър и клиент
+
+---
+
+#### TCP vs. UDP
+
+<table style="font-size:0.5em; line-height=0.7em;">
+  <tr>
+    <th>Характеристика</th>
+    <th>TCP</th>
+    <th>UDP</th>
+  </tr>
+  <tr>
+    <td>Connection</td>
+    <td>connection-based</td>
+    <td>connection-less</td>
+  </tr>
+  <tr>
+    <td>Надеждност</td>
+    <td>висока</td>
+    <td>ниска</td>
+  </tr>
+  <tr>
+    <td>Ред на пакетите</td>
+    <td>гарантиран</td>
+    <td>не гарантиран</td>
+  </tr>
+  <tr>
+    <td>Скорост на доставка</td>
+    <td>по-ниска от UDP</td>
+    <td>по-висока от TCP</td>
+  </tr>
+  <tr>
+    <td>Проверка за грешки</td>
+    <td>да, с възстановяване</td>
+    <td>да, но без възстановяване</td>
+  </tr>
+  <tr>
+    <td>Потвърджаване при получаване</td>
+    <td>да</td>
+    <td>не</td>
+  </tr>
+</table>
+
+---
+
+#### Клиент-сървър имплементация със сокети
+
+---
+
+#### `java.net.ServerSocket`
+
+```java
+ServerSocket() // създава server socket, който не е свързан.
+               // Изисква извикване на bind(), преди да се използва
+ServerSocket(int port) // създава server socket, свързан с дадения порт.
+                       // Стойноста на port е от 0 до 65535,
+                       // като 0 означава автоматично определен
+ServerSocket(int port, int backlog) // задава максимален брой чакащи
+                                    // заявки за свързване
+ServerSocket(int port, int backlog, InetAddress bindAddr)
+
+void bind(SocketAddress endpoint) // свързва към конкретния IP адрес
+void bind(SocketAddress endpoint, int backlog)
+
+Socket accept() // блокира и чака заявка за свързване от клиент
+```
+
+---
+
+#### `java.net.Socket`
+
+```java
+Socket() // създава socket, който не е свързан
+Socket(String host, int port) // създава socket и го свързва
+                              // със зададения host и порт
+Socket(InetAddress address, int port)
+
+void connect​(SocketAddress endpoint) // свързва сокета към сървъра
+void connect​(SocketAddress endpoint, int timeout)
+
+InputStream getInputStream() // връща входен поток за четене
+OutputStream getOutputStream() // връща изходен поток за писане
+```
+
+---
+
+#### Сокети (Sockets)
+
+![Socket Calls](images/10.3-network-sockets.png)
+
+---
+
+#### java.net | TCP комуникация
+
+![TCP Flow](images/10.7-java-net-tcp-flow.png)
+
+---
+
+#### java.net: blocking мрежова комуникация
+
+![Blocking IO](images/10.6-java-net-blocking-io.png)
+
+---
+
+#### java.net | Клиент-сървър архитектура
+
+![Java.net Architecture](images/10.8-java-net-architecture.png)
+
+---
+
+#### java.net | Архитектура
+
+![Java.net Architecture](images/10.8.1-java-net-multithreading.png)
+
+---
+
+#### java.net | Предимства и недостатъци
+
+- Предимства
+  - Сравнително прост код: познатото I/O Stream API
+  - Няма нужда от проверки за частично получени съобщения
+    - нишката блокира, докато прочете цялото съобщение
+- Недостатъци
+  - Неефективно използване на нишките
+    - Много нишки в waiting/blocked състояние, заради блокиращите операции
+    - Допълнителна памет (за нишките)
+  - Performance penalty заради context switching между нишките
+  - Ограничен брой паралелни конекции, защото нишките на сървъра са краен брой
+
+---
+
+#### Мрежово програмиране с Non-blocking I/O (NIO)
+
+- Java NIO API-то реализира алтернативен начин за мрежова комуникация, който позволява неблокиращи (асинхронни) входно-изходни операции
+- Чрез него се реализират мрежови приложения, които работят ефективно с огромен брой паралелни клиенти и заявки
+
+---
+
+#### java.nio | Основни обекти
+
+- **Буфер** (Buffer) - Блок от паметта, който се използва за временно съхранение на данни за четене или писане
+- **Канал** (Channel) - Абстракция за комуникационна връзка (connection)
+- **Селектор** (Selector) - Компонент, в който се регистрират множество канали, позволяващ обработката им в една нишка
+
+---
+
+#### java.nio | Буфери
+
+- Буферът е контейнер, който съдържа временно данни, които ще бъдат записани или прочетени
+- Представлява масив от примитивен тип с фиксиран размер, който пази състояние: докъде е запълнен, колко свободно място има, докъде са прочетени или записани данните
+- Класът `Buffer` е абстрактен, но има наследници за всички не-булеви примитивни типове: `ByteBuffer`, `CharBuffer`, `ShortBuffer`, `IntBuffer`, `LongBuffer`, `FloatBuffer`, `DoubleBuffer`
+- `java.nio` комуникацията се основава на буфери, за разлика от `java.io` комуникацията, основана на входно-изходни потоци
+
+---
+
+#### java.nio.Buffer
+
+- Състоянието на буфера се определя от четири атрибута:
+    - *капацитет* (capacity): максималния брой елементи, които може да съдържа буфера. Задава се при създаването му и не може да се променя
+    - *лимит* (limit): първият индекс на буфера, който не трябва да се достъпва за четене или писане
+    - *позиция* (position): индекса на следващия елемент на буфера за прочитане или за записване
+    - *маркер* (mark): индекс, в който може да запомним текущата позиция, за да се върнем към нея по-късно
+- Четирите индекса са в следната зависимост:
+    0 <= mark <= position <= limit <= capacity
+
+---
+
+#### java.nio.Buffer
+
+```java
+int capacity()
+int position()
+Buffer position(int newPosition)
+int limit()
+Buffer limit(int newLimit)
+Buffer mark()
+Buffer reset()
+```
+
+---
+
+#### java.nio.Buffer
+
+```java
+// Подготвя буфера за "източване" / прочитане.
+// Лимитът става равен на позицията, а позицията на нула
+Buffer flip()
+
+// Подготвя буфера за ново запълване.
+// Лимитът става равен на капацитета, а позицията на нула
+Buffer clear()
+
+// Подготвя буфера за повторно прочитане на данните,
+// които вече съдържа. Лимитът остава без промяна,
+// позицията се нулира
+Buffer rewind()
+```
+
+---
+
+#### java.nio.ByteBuffer
+
+```java
+byte get()
+byte get(int index)
+ByteBuffer put(byte b)
+ByteBuffer put(int index, byte b)
+```
+
+---
+
+#### java.nio | Как работи буферът
+
+![NIO Buffer Operations](images/10.9-nio-buffer-operations.png)
+
+---
+
+#### java.nio | Директни и индиректни буфери
+
+<small>
+- Буферите биват *директни* и *индиректни*
+- Директните буфери ще използват при възможност native I/O операции за четене и запис директно през операционната система
+- Директният буфер представлява непрекъснат регион на постоянно място в паметта, индиректният е Java масив, може да не е непрекъснят регион и може да се мести от garbage collector-a
+- Директният буфер е по-скъп за създаване, но ще работи по-ефективно за големи размери и ако живее дълго в паметта
+- Индиректният буфер не е толкова ефективен като директният за повечето операции, но управлението на паметта му се осъществява от JVM-a (garbage collector-a) и е по-предсказуемо
+
+</small>
+
+<br/>
+
+```java
+ByteBuffer buffer = ByteBuffer.allocateDirect(1024); // direct buffer
+ByteBuffer buffer = ByteBuffer.allocate(1024); // indirect buffer
+```
+
+---
+
+#### Java I/O performance
+
+![Java IO Performance](images/10.10-java-io-performance.png)
+
+---
+
+#### Канали (Channels)
+
+- Каналите са абстракция за връзка ("тръба") за ефективно транспортиране на данни между byte буфери и обект на другия край на канала (най-често файл или сокет)
+- Каналите позволяват с минимален overhead да се достъпват native входно-изходните услуги на операционна система, а буферите са вътрешните крайни точки, които каналите използват за изпращане и получаване на данни
+
+---
+
+#### java.nio.channels.ServerSocketChannel
+
+```java
+// Opens a server-socket channel
+static ServerSocketChannel open()
+
+// Accepts a connection made to this channel's socket
+SocketChannel accept()
+
+// Binds the channel's socket to a local address
+// and configures the socket to listen for connections
+ServerSocketChannel bind​(SocketAddress local) 
+
+// Retrieves a server socket associated with this channel
+ServerSocket socket()
+```
+
+---
+
+#### java.nio.channels.SocketChannel
+
+```java
+// Opens a socket channel
+static SocketChannel open()
+// Opens a socket channel and connects it to a remote address
+static SocketChannel open​(SocketAddress remote)
+
+// Connects this channel's socket
+boolean connect​(SocketAddress remote)
+
+// Retrieves a socket associated with this channel
+Socket socket() 
+
+// Reads bytes from this channel into the given buffer
+int read​(ByteBuffer dst) 
+// Writes bytes to this channel from the given buffer
+int write​(ByteBuffer src)
+```
+
+---
+
+#### Selector и SelectionKey
+
+<small>
+Селекторите осигуряват възможността за избор (селектиране) на канали според готовността им за I/O операции (readiness selection), което е предпоставка за multiplexed I/O, т.е. с една нишка да обслужваме голям брой канали.
+
+1. Регистрираме един или повече вече създадени канали с инстанция на селектор
+2. Регистрирането връща ключ, който представлява релацията между канала и селектора
+3. Ключът "помни" операциите върху даден канал, от които се интересуваме и следи готовността на канала да ги изпълнява
+4. При извикване на select() метода на селектора, се актуализират всички асоциирани с този селектор ключове на канали
+5. От селектора може да получим множеството от ключове, чиито канали са готови за операция
+6. Итерираме това множество и обслужваме всеки от готовите канали
+
+</small>
+
+---
+
+![Selectors and Channels](images/10.11-selectors-and-channels.jpg)
+
+---
+
+#### java.nio.channels.Selector
+
+```java
+// Opens a selector
+static Selector open()
+
+// Selects a set of keys whose corresponding channels are ready for I/O operations
+int select()
+
+// Returns this selector's selected-key set
+Set<SelectionKey> selectedKeys()
+```
+
+---
+
+#### java.nio.channels.SelectionKey
+
+```java
+public static final int OP_READ
+public static final int OP_WRITE
+public static final int OP_CONNECT
+public static final int OP_ACCEPT
+
+SelectableChannel channel();
+Selector selector();
+int interestOps();
+int readyOps();
+
+boolean isReadable()
+boolean isWritable()
+boolean isConnectable()
+boolean isAcceptable()
+
+Object attach(Object ob)
+Object attachment()
+```
+
+---
+
+#### java.nio.channels.ServerSocketChannel
+
+```java
+// ServerSocketChannel е канал, който може да слуша
+// за входящи TCP заявки за свързване, точно както ServerSocket
+
+ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
+serverSocketChannel.bind(new InetSocketAddress(9999));
+serverSocketChannel.configureBlocking(false);
+
+while (true) {
+    SocketChannel socketChannel = serverSocketChannel.accept();
+    ...
+}
+```
+
+---
+
+#### java.nio | SocketChannel | Регистрация
+
+```java
+
+// SocketChannel представлява една TCP връзка. За да се използва
+// асинхронно, трябва да се регистрира в селектор. Каналът трябва
+// да се постави в nonblocking режим, преди да се регистрира със селектор.
+
+Selector selector = Selector.open();
+socketChannel.configureBlocking(false);
+socketChannel.register(selector,
+        SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+```
+
+---
+
+#### java.nio | SocketChannel | Регистрация
+
+- Когато регистрираме `SocketChannel`, трябва да укажем, за какви операции да бъдем известени:
+    - `OP_READ` – когато се получи нещо за четене от канала
+    - `OP_WRITE` – когато каналът е готов за запис
+    - `OP_CONNECT` – когато каналът е готов да завърши последователността си за свързване към отдалечената система
+    - `OP_ACCEPT` – когато пристигне заявка за нова конекция
+
+---
+
+#### java.nio | SocketChannel | Notification
+
+```java
+// Получаване на известие за няколко канала
+while (true) {
+    int readyChannels = selector.select();
+    if (readyChannels == 0) { continue; }
+
+    Set<SelectionKey> selectedKeys = selector.selectedKeys();
+    Iterator<SelectionKey> keyIterator = selectedKeys.iterator();
+    while (keyIterator.hasNext()) {
+        SelectionKey key = keyIterator.next();
+        if (key.isReadable()) {
+            // A channel is ready for reading
+        }
+        keyIterator.remove();
+    }
+}
+```
+
+---
+
+#### java.nio | SocketChannel | Notification | Четене
+
+```java
+// Четене на данните от канал
+if (key.isReadable()) {
+    SocketChannel sc = (SocketChannel) key.channel();
+    while (true) {
+        buffer.clear();
+        int r = sc.read(buffer);
+        if (r <= 0) { continue; }
+        buffer.flip();
+        sc.write(buffer);
+    }
+} else if (key.isWritable()) {
+...
+}
+```
+
+---
+
+#### java.nio | SocketChannel | Запис
+
+```java
+// Използваме SocketChannel канал (channel) и за изпращане на данни
+// по TCP връзката (connection)
+
+SocketChannel socketChannel = SocketChannel.open();
+socketChannel.connect(new InetSocketAddress("127.0.0.1", 9999));
+
+String newData = "Current time: " + System.currentTimeMillis();
+ByteBuffer buf = ByteBuffer.allocate(48);
+
+buf.put(newData.getBytes());
+buf.flip();
+while (buf.hasRemaining()) {
+    socketChannel.write(buf);
+}
+```
+
+---
+
+#### java.nio | Изпращане на данни
+
+![Java NIO Sending](images/10.11.1a-java-nio-sending.png)
+
+---
+
+#### java.nio | Изпращане на данни
+
+![Java NIO Sending](images/10.11.1b-java-nio-sending.png)
+
+---
+
+#### java.nio | Изпращане на данни
+
+![Java NIO Sending](images/10.11.1c-java-nio-sending.png)
+
+---
+
+#### java.nio | Изпращане на данни
+
+![Java NIO Sending](images/10.11.1d-java-nio-sending.png)
+
+---
+
+#### java.nio | Получаване на данни
+
+![Java NIO Receiving](images/10.11.2a-java-nio-receiving.png)
+
+---
+
+#### java.nio | Получаване на данни
+
+![Java NIO Receiving](images/10.11.2b-java-nio-receiving.png)
+
+---
+
+#### java.nio | Получаване на данни
+
+![Java NIO Receiving](images/10.11.2c-java-nio-receiving.png)
+
+---
+
+#### java.nio | Получаване на данни
+
+![Java NIO Receiving](images/10.11.2d-java-nio-receiving.png)
+
+---
+
+#### java.nio | Архитектура
+
+- Нишка селектор (Selector), която позволява обработването на няколко канала от една нишка
+- Намалява броя на нишките, като премахва нуждата от отделна нишка за всяка връзка (connection)
+- Асинхронни (неблокиращи) операции
+
+---
+
+![Java NIO Architecture](images/10.13-java-nio-architecture-2.png)
+
+---
+
+![Java NIO Architecture](images/10.14-java-nio-architecture-3.png)
+
+---
+
+![Java NIO Architecture](images/10.15-java-nio-architecture-4.png)
+
+---
+
+![Java NIO Architecture](images/10.16-java-nio-architecture-5.png)
+
+---
+
+![IO vs. NIO](images/10.17-io-vs-nio.png)
+
+---
+
+![Java NIO](images/10.18-java-nio-oreilly.jpg)
+
+---
+
+## Въпроси
+
+@snap[south span-100]
+@fab[github] [fmi/java-course](https://github.com/fmi/java-course)
+@fab[youtube] [MJT2021](https://www.youtube.com/playlist?list=PLew34f6r0Pxy8PvaJ83pa4r76XCmZR657)
+@snapend
+
+## HTTP, REST, JSON и `HttpClient`
+
+_06.01.2021_
+
+---
+
+#### Предната лекция говорихме за:
+
+@ul
+
+- Thread pools / Executors API
+- Concurrent колекции
+- Мрежово програмиране
+
+@ulend
+
+---
+
+#### Днес ще разгледаме:
+
+@ul
+
+- HTTP
+- REST
+- JSON
+- `HttpClient`
+
+@ulend
+
+---
+
+#### Как работи Интернет?
+
+![HTTP request](images/11.1-http-request.png)
+
+---
+
+#### Характеристики на HTTP
+
+@ul
+
+- HTTP (Hypertext Transfer Protocol) e приложен протокол
+- Като транспортен протокол, почти винаги се ползва ТCP/IP, в редки случаи и UDP
+- Модел заявка-отговор (request-response) - служи за комуникационен канал в клиент-сървър архитектура, като следва строги правила за ред и формат на съобщенията между участниците
+- HTTP сървърите по подразбиране "слушат" на порт 80
+
+@ulend
+
+---
+
+#### Характеристики на HTTP
+
+@ul
+
+- Не пази състояние (*stateless*) – всяка клиентска заявка е независима сама по себе си
+- Сървърът не обвързва логически серия заявки от определен клиент
+- Това води до липса на вграден в протокола механизъм за поддържане на сесии
+
+@ulend
+
+---
+
+#### HTTP транзакция "от птичи поглед"
+
+1. Клиентът отваря комуникационен канал (TCP сокет)
+2. Клиентът изпраща заявка към сървъра
+3. Сървърът връща отговор на клиента
+4. Сървърът затваря сокета
+
+---
+
+#### Видове HTTP съобщения: Заявки
+
+@ul
+
+- *Заявка* – инициатор е клиентът – подава информация на сървъра, достъп до кой ресурс иска да получи и каква операция иска да извърши с него (и евентуални входни параметри). Клиент (условно наречен *User-Agent* в HTTP) може да бъде всяко софтуерно приложение, спазващо правилата на протокола на комуникация
+
+@ulend
+
+---
+
+#### Видове HTTP съобщения: Отговори
+
+@ul
+
+- *Отговор* – изпраща се от уеб сървъра, като резултат от изпълнението на клиентска заявка. Под уеб сървър разбираме софтуерно приложение, служещо като доставчик на дадени услуги върху определени негови ресурси
+
+@ulend
+
+---
+
+#### HTTP Заявка
+
+- Начален ред
+- Хедъри (headers)
+- Тяло (данни)
+
+---
+
+#### HTTP Заявка: начален ред
+
+@ul
+
+- HTTP Метод (Глагол) – указва типа операция, която клиентът иска да извърши със заявения ресурс
+- URL (Uniform Resource Locator) – уникален локатор на заявения ресурс
+- Версия на HTTP – версията на протокола, която ще се ползва за комуникация
+
+@ulend
+
+---
+
+#### HTTP Заявка: хедъри и данни
+
+@ul
+
+- *Хедъри* - Възможно е да дефинира множество хедъри, като всеки от тях заема точно един ред и следва формата: “Име на хедър: Стойност на хедър”
+- *Данни (Тяло)* – опционални, може да съдържат множество редове, включително и празни
+
+@ulend
+
+---
+
+#### HTTP Заявка - пример
+
+```http
+GET en.wikipedia.org/w/index.php HTTP/1.1
+```
+
+```http
+Connection: Keep-Alive
+Host: en.wikipedia.org
+```
+
+---
+
+#### HTTP заявка - пример
+
+![HTTP sample request](images/11.2-http-sample-request.png)
+
+---
+
+#### HTTP ресурси
+
+Унифициран локатор на ресурси (URL) - стандартизиран адрес на даден мрежов ресурс (документ или страница).
+
+![URL](images/11.3-url.png)
+
+---
+
+### Основни HTTP методи
+
+@ul
+
+- GET – за зареждане на ресурс от сървъра
+- HEAD - идентичен с GET, с разликата, че отговорът няма да върне тяло, а само хедъри
+
+@ulend
+
+---
+
+### Основни HTTP методи
+
+@ul
+
+- POST - изпраща данни (например от HTML форма) за обработка от сървъра. Данните се съдържат в тялото на заявката
+- PUT – ъплоудва даден ресурс
+- DELETE – трие даден ресурс
+
+@ulend
+
+---
+
+#### HTTP отговор
+
+@ul
+
+- Начален ред – съдържа 3 елемента, разделени с празно пространство помежду си:
+  - Версия на HTTP
+  - Статус код – обяснява резултата от изпълнението на заявката
+  - Причина – кратко обяснение на статус-кода
+- Хедъри
+- Данни (Тяло) – отговорите обикновено връщат данни, като тук най-често се съдържа HTML документът, получен на базата на клиентската заявка.
+
+@ulend
+
+---
+
+#### HTTP отговор - пример
+
+```http
+HTTP/1.1 200 OK
+```
+
+```http
+Date: Tue, 18 Oct 2018 19:08:15 GMT
+Server: Apache
+```
+
+---
+#### HTTP отговор - пример
+
+![HTTP response](images/11.4-http-sample-response.png)
+
+---
+
+#### HTTP статус кодове
+
+- Трицифрени кодове, идентифициращи какъв е резултът от обработката на клиентската заявка
+- Групирани са в 5 категории, на базата на цифрата на стотиците
+
+---
+
+#### HTTP статус кодове: група 100
+
+Не дават индикация дали заявката е била успешна или не. Служат за „временни“ кодове, т.е. заявката е пристигнала, но сървърът все още не е готов с резултата.
+
+```http
+100 Continue
+101 Switching protocols
+```
+
+---
+
+#### HTTP статус кодове: група 200
+
+Сървърът е обработил успешно клиентската заявка
+
+```http
+200 OK
+206 Partial content
+```
+
+---
+
+#### HTTP статус кодове: група 300
+
+Ресурсът е наличен, но е разположен на друго място
+
+```http
+301 Moved permanently
+304 Not Modified
+307 Temporary redirect
+```
+
+---
+
+#### HTTP статус кодове: група 400
+
+Клиентска грешка
+
+```http
+400 Bad Request
+401 Not Authorized
+404 Not Found
+408 Request Timeout
+```
+
+---
+
+#### HTTP статус кодове: група 500
+
+Сървърна грешка
+
+```http
+500 Internal Server Error
+501 Not Implemented
+503 Service Unavailable
+```
+
+---
+
+#### HTTP хедъри: Основни (General Headers)
+
+Могат да се ползват едновременно и в заявки, и в отговори. Съдържат информация (мета-данни) за самото съобщение или за метода на комуникация
+
+```http
+Connection: keep-alive
+Date: Sat, 17 Nov 2018 16:08:15 GMT
+```
+
+---
+
+#### HTTP хедъри: Заявка (Request Headers)
+
+Специфични са само за заявките и могат да съдържат данни за самата заявка или за клиента
+
+
+```http
+Accept: text/html
+Accept-Charset: utf-8
+Accept-Language: en-US
+User-Agent: Mozilla/4.0 
+```
+
+---
+
+#### HTTP хедъри: Отговор (Response Headers)
+
+Съдържат информация (мета-данни) за сървъра и формата на съобщението
+
+
+```http
+Server: Apache
+Allow: GET, HEAD
+```
+
+---
+
+#### HTTP хедъри: Същински (Entity Headers)
+
+Информация за самото съдържание на данни (тяло) и/или за ресурса, заявен от клиента
+
+
+```http
+Content-Language: en
+Content-Encoding: gzip
+Content-Length: 8582
+Last-Modified: Tue, 15 Nov 2018 12:45:26 GMT
+```
+
+---
+
+#### HTTP хедъри: User Agent
+
+*User Agent* е софтуер, който извършва действие от името на потребителя: E-mail клиенти, Web Browser-и, Месинджъри: Skype, WhatsApp
+
+Примерeн низ за Google Chrome Web Browser:
+
+```http
+Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML,
+          like Gecko) Chrome/38.0.2125.101 Safari/537.36
+```
+
+---
+
+#### HTTP сесии - механизми
+
+<small>
+Понеже HTTP протоколът няма вградена поддръжка на сесии, ако има нужда сървърът да може да корелира заявките, идващи от един и същи клиент като логически принадлежащи към една последователност, обикново се ползва един от следните начини:
+
+- *Бисквитки* (*Cookies*): Cookie-тата са малки текстови файлове, генерирани от сървъра и изпратени на клиента в header-ите. Чрез информацията в тях може да се идентифицира сесията
+- Hidden fields в HTML forms: HTML страницата съдържа форма с поле, което е скрито и не се визуализира в браузъра, но стойността му се праща като част от заявката и стойността му идентифицира сесията (`<input type="hidden">`)
+- URL rewriting: добавяме в края на всяко URL данни, които да идентифицират сесията
+
+</small>
+
+---
+
+#### HTTP vs HTTPS
+
+![HTTPS](images/11.5-https.png)
+
+---
+
+#### HTTP/2
+
+- Появява се през 2015-та
+- Какви проблеми на HTTP 1.x решава?
+
+---
+
+#### HTTP/2 vs HTTP 1.1
+
+@ul
+
+- двоичен, вместо текстови (⇨ по-компактен)
+- напълно multiplexed, вместо подреден и блокиращ
+- постига паралелизъм само с една TCP връзка между клиента и сървъра
+- Използва компресия на хедърите
+- Разрешава сървърите да “push”-ват HTTP response-и проактивно към клиента
+
+@ulend
+
+---
+
+#### HTTP/2 Multiplexing
+
+![HTTP2 Multiplexing](images/11.6-http2-multiplexing.png)
+
+---
+
+#### HTTP 1.1 vs. HTTP/2 response time
+
+![HTTP2 Response Time](images/11.7-http2-response-time.png)
+
+---
+
+#### HTTP/2: поддръжка към днешна дата
+
+@ul
+
+- практически всички web browsers
+- 50% от всички web sites към януари 2021 (43% през януари 2020)
+- HttpClient-a в Java 11
+
+@ulend
+
+---
+
+## REST
+
+---
+
+#### REpresentational State Transfer (REST)
+
+@ul
+
+- REST е стил софтуерна архитектура за реализация на уеб услуги.
+  - REST не е спецификация или протокол
+- Състои се от 6 принципа, които допринасят към това уеб услугата да бъде проста, бързодействаща и скалируема.
+
+@ulend
+
+---
+
+#### REST (2)
+
+@ul
+
+- Има за цел да подобри и улесни комуникацията между две системи.
+- Уеб услугите, които покриват REST принципите, се наричат RESTful уеб услуги.
+- WWW е RESTful
+
+@ulend
+
+---
+
+#### Принципи на REST архитектурата
+
+@ul
+
+- REST е клиент-сървър архитектура
+- REST предоставя единен интерфейс (контракт)
+- REST не пази състояние (stateless)
+- REST предлага възможности за кеширане
+- REST е многослойна система
+- REST предоставя code on demand
+
+@ulend
+
+---
+
+#### REST is client-server architecture
+
+@ul
+
+- Клиентът и сървърът са отделни компоненти
+- Separation of concerns:
+  - Сървърът съдържа бизнес логиката и се грижи за съхранението на данните
+  - Клиентът извлича данни от сървъра и се грижи за представянето на данните:
+    - уеб клиенти - браузъри
+    - конзолни клиенти
+    - ...
+
+@ulend
+
+---
+
+#### REST is client-server architecture (2)
+
+@ul
+
+- Единният интерфейс позволява разделянето на клиент и сървър.
+- Клиентът и сървърът могат да бъдат променяни независимо един от друг, стига това да не променя единния интерфейс помежду им.
+
+@ulend
+
+---
+
+#### Пример за клиент-сървър
+
+@ul
+
+- Дa предположим, че искаме да извлечем информация за даден потребител от GitHub. REST API документация за въпросната операция - [link](https://docs.github.com/en/free-pro-team@latest/rest/reference/users#get-a-user).
+- Можем да го направим през:
+  - уеб клиент - @size[1.0em](https://github.com/{username})
+  - Java клиент - [hub4j/github-api](https://github.com/hub4j/github-api/)
+  - заявка към REST API-то
+    - @size[0.75em]($ curl https://api.github.com/users/{username})
+  - ...
+
+@ulend
+
+---
+
+#### Ресурси
+
+@ul
+
+- REST въвежда концепцията за ресурс.
+- Всяка информация, която може да бъде именувана, може да бъде ресурс.
+- Ние, като програмисти, дефинираме кои са ресурсите, с които ще оперира нашата уеб услуга.
+- В примера, който разгледахме, ресурси бяха дадените GitHub потребители.
+- Ресурси могат да бъдат html страници, js файлове, изображения, потребители и др.
+
+@ulend
+
+---
+
+#### Идентификатори на ресурси
+
+<small>
+- Всеки ресурс се идентифицира чрез URI (uniform resource identifier)
+- Примери:
+
+</small>
+
+```bash
+# Get all repos in fmi organisation
+$ curl https://api.github.com/orgs/fmi/repos
+# Get fmi/java-course repo
+$ curl https://api.github.com/repos/fmi/java-course
+```
+
+---
+
+#### Представяне на ресурси
+
+@ul
+
+- Ресурсите са концептуално разделени от представянията, които се връщат към клиентите.
+- Например сървър пази ресурсите си в база от данни и на файловата система, а връща на клиентите ресурси под формата на HTML, JSON и XML.
+- Не винаги върнатото представяне е вътрешното представяне.
+
+@ulend
+
+---
+
+#### REST provides a uniform interface
+
+<small>
+- REST предоставя единен интерфейс (контракт) между клиента и сървъра.
+- Контрактът се изгражда въз основа на ресурсите.
+- [Github REST API](https://developer.github.com/v3/)
+
+</small>
+
+```bash
+# Github API does not support text/html
+# instead use application/json
+$ curl --header "Accept: text/html" \
+  https://api.github.com/repos/fmi/java-course
+# repozzz resource does not exist
+$ curl https://api.github.com/repozzz/fmi/java-course
+```
+
+---
+
+## JSON
+
+---
+
+@ul
+
+- Форматите за обмен на данни са зависими от използваната архитектура:
+  - Уеб услуги, базирани на SOAP - само XML
+  - Уеб услуги, базирани на REST - JSON, XML и други.
+
+@ulend
+
+---
+
+#### JavaScript Object Notation (JSON)
+
+@ul
+
+- един от най-популярните формати за обмен на данни
+- произлиза от JavaScript
+- използва се за предаване на структурирани данни по мрежова комуникация
+- намира широко приложение в RESTful уеб приложенията за предоставяне на данни
+
+@ulend
+
+---
+
+#### JSON - характеристики
+
+@ul
+
+- web friendly - тривиално парсване (за разлика от XML)
+- кратък и интуитивен
+- разбираем едновременно от човек и машина
+- езиково независима спецификация - [RFC 7159](https://tools.ietf.org/html/rfc7159)
+- почти всички езици поддържат JSON
+
+@ulend
+
+---
+
+#### Пример
+
+```bash
+$ curl https://api.github.com/users/kelseyhightower
+```
+
+```json
+{
+  "login": "kelseyhightower",
+  "name": "Kelsey Hightower",
+  "company": "Google, Inc",
+  "location": "Portland, OR",
+  "email": null,
+  "hireable": true,
+  "followers": 10041,
+  "following": 13
+}
+```
+
+---
+
+#### Типове данни
+
+@ul
+
+- Boolean - `true` / `false`
+- Number - `42`, `3.14156`, `-1`
+- String - `"foo"`, `"bar"`
+- Array - `["John", "Anna", "Peter"]`
+- Object - `{"name": "John", "age": 30}`
+- Поддържа `null`, `{}`, но не и функция, дата или `undefined`
+
+@ulend
+
+---
+
+#### Пример (2)
+
+```bash
+$ curl https://api.github.com/repos/kubernetes/kubernetes/tags
+```
+
+```json
+[
+  {
+    "name": "v1.14.0-alpha.0",
+    "commit": {
+      "sha": "1f56cd801e795fd063ec3e61fe4f6fa8841f4222"
+    }
+  },
+  {
+    "name": "v1.13.2-beta.0",
+    "commit": {
+      "sha": "efe48f3cd6436737d37fd2fcd6beb9e2328f7cce"
+    }
+  }
+]
+```
+
+---
+
+#### Java библиотеки за работа с JSON
+
+
+@ul
+
+- [google/gson](https://github.com/google/gson)
+- [FasterXML/jackson](https://github.com/FasterXML/jackson)
+- ...
+
+@ulend
+
+---
+
+#### `google/gson`
+
+@ul
+
+- Предоставя лесен механизъм за преобразуване от Java обект към JSON и обратно
+    - .toJson() и .fromJson()
+- Не изисква добавяне на анотации или прекомпилиране
+- Позволява вмъкването на custom serializer/deserializer
+- Комплексен Builder
+- [Gson User Guide](https://github.com/google/gson/blob/master/UserGuide.md)
+
+@ulend
+
+---
+
+#### `.toJson(Object src)`
+
+```java
+public class Developer {
+    private String name;
+    private int age;
+    public Developer(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+}
+```
+
+```java
+Developer dev = new Developer("Kelsey", 28);
+Gson gson = new Gson();
+String json = gson.toJson(dev);
+// {"name":"Kelsey","age":28}
+System.out.println(json);
+```
+
+---
+
+#### `.fromJson(String json, Class<T> classOfT)`
+
+```java
+String json = "{\"name\": \"Wesley\", \"age\": 20 }";
+Gson gson = new Gson();
+Developer dev = gson.fromJson(json, Developer.class);
+// Wesley, 20 years old
+System.out.printf("%s, %d years old%n",
+    dev.getName(), dev.getAge());
+```
+
+---
+
+#### `.fromJson(Reader json, Class<T> classOfT)`
+
+```java
+Gson gson = new Gson();
+FileReader reader = new FileReader(new File("devs.json"));
+// unchecked conversion
+List<Developer> devs = gson.fromJson(reader, List.class);
+```
+
+---
+
+#### `.fromJson(String json, Type typeOfT)`
+
+```java
+List<Developer> devs = List.of(
+        new Developer("Kelsey", 28),
+        new Developer("Wesley", 20));
+Gson gson = new Gson();
+String json = gson.toJson(devs);
+Type type = new TypeToken<List<Developer>>(){}.getType();
+List<Developer> devsAgain = gson.fromJson(json, type);
+System.out.println(devsAgain.size()); // 2
+```
+
+---
+
+## Java HTTP Client
+
+@ul
+
+- Част от JDK-то от Java 11 (септември 2018)
+- Използва се за request-ване на HTTP ресурси по мрежата и обработка на response-а
+- Поддържа HTTP/1.1 и HTTP/2
+- Поддържа както синхронни, така и асинхронни заявки
+- Състои се от няколко класа и интерфейса в пакета `java.net.http`
+
+@ulend
+
+---
+
+#### Пример: GET заявка, която печата тялото на reponse-a като низ
+
+```java
+HttpClient client = HttpClient.newHttpClient();
+HttpRequest request = HttpRequest.newBuilder()
+      .uri(URI.create("http://wikipedia.org/"))
+      .build();
+client.sendAsync(request, BodyHandlers.ofString())
+      .thenApply(HttpResponse::body)
+      .thenAccept(System.out::println)
+      .join();
+```
+
+---
+
+#### `HttpClient`
+
+<small>
+- "Входната точка" на API-то. Представлява клиент за пращане на HTTP заявки и получаване на отговори
+- Инстанция на `HttpClient` се създава от статичен builder метод на класа
+- Builder-ът може да се ползва за конфигуриране на клиента (предпочитана версия на протокола, да следва ли redirects, ползва ли прокси и т.н.)
+- веднъж създаден, е immutable, но може да се ползва за пращане на много заявки
+
+</small>
+
+```java
+var client = HttpClient.newHttpClient();
+var client = HttpClient.newBuilder().build(); // equivalent
+```
+
+---
+
+#### Пример
+
+```java
+HttpClient client = HttpClient.newBuilder()
+      .version(Version.HTTP_2)
+      .followRedirects(Redirect.SAME_PROTOCOL)
+      .proxy(ProxySelector.of(
+              new InetSocketAddress("www-proxy.com", 8080)))
+      .authenticator(Authenticator.getDefault())
+      .build();
+```
+
+---
+
+#### `HttpRequest`
+
+- Клас, представляващ HTTP заявка, включително URI, метод, хедъри и т.н.
+-  `HttpRequest` инстанция се създава от статичен builder метод на класа
+- Builder-ът може да се ползва за конфигуриране на
+  - URI и метод на заявката, хедъри, тяло (ако има)
+- съдържа тези "готови" методи: `GET()`, `POST()`, `DELETE()` и `PUT()`. Останалите се конфигурират с `method()`
+  - методът по подразбиране е GET() и може да се пропусне
+- веднъж създаден, е immutable, но може да се праща многократно
+
+---
+
+#### Пример: Създаване на `HttpRequest`
+
+```java
+var request1 = HttpRequest.newBuilder(URI.create("https://www.apple.com/"))
+        .build();
+var request2 = HttpRequest.newBuilder()
+        .uri(URI.create("https://www.apple.com/"))
+        .build(); // equivalent
+
+var request3 = HttpRequest.newBuilder()
+        .uri(URI.create("http://openjdk.java.net/"))
+        .timeout(Duration.ofMinutes(1))
+        .header("Content-Type", "application/json")
+        .POST(BodyPublishers.ofFile(Paths.get("file.json")))
+        .build();
+```
+
+---
+
+#### `HttpRequest.BodyPublisher`
+
+<small>
+- Ако заявката има тяло (например POST заявка), този клас отговаря за "публикуването" на съдържанието на тялото от даден източник, например низ
+- В класа `BodyPublishers` има factory методи за получаване на готови често използвани типове
+
+</small>
+
+```java
+BodyPublishers::ofString
+BodyPublishers::ofFile
+BodyPublishers::ofByteArray
+BodyPublishers::ofInputStream
+```
+
+---
+
+#### `HttpResponse`
+
+<small>
+- Интерфейс, представляващ HTTP response, включително header-а и body-то (ако има)
+- Инстанции на имплементации на този интерфейс се получават в резултат на пращане на `HttpRequest` от `HttpClient`
+
+</small>
+
+```java
+T body()                     // тялото на отговора
+HttpHeaders headers()        // хедърите на отговора
+HttpRequest request()        // HttpRequest-а, отговарящ на този отговор
+int statusCode()             // HTTP статус кода
+URI uri()                    // URI-то на заявката
+HttpClient.Version version() // версията на HTTP протокола
+```
+
+---
+
+#### `HttpResponse.BodyHandler`
+
+<small>
+- Функционален интерфейс, който приема информация за response-a (статус код и хедъри) и връща `BodySubscriber`, който се грижи за "консумирането" (т.е. обработката) на тялото на response-a
+- В класа `BodyHandlers` има фактори методи за получаване на готови често използвани типове
+
+</small>
+
+```java
+BodyHandlers::ofByteArray
+BodyHandlers::ofFile
+BodyHandlers::ofString
+BodyHandlers::ofInputStream
+```
+
+---
+
+#### `HttpResponse.BodySubscriber`
+
+- "Абонира се" за тялото на response-a и трансформира байтовете му в друга форма (низ, файл и т.н.)
+- В класа `BodySubscribers` има factory методи за получаване на готови често използвани типове
+
+---
+
+#### Синхронни и асинхронни заявки
+
+- Зявките могат да се пращат синхронно или асинхронно
+- Синронното API блокира, докато не се върне `HttpResponse`
+- Асинхронното API връща веднага инстанция на `CompletableFuture`, което завършва с `HttpResponse`, когато стане наличен
+- `BodyHandler`-ът за всяка заявка определя как да се обработи тялото на response-а, ако има такова
+
+---
+
+#### Синхронни и асинхронни заявки
+
+```java
+HttpResponse<String> response =
+      client.send(request, BodyHandlers.ofString());
+System.out.println(response.statusCode());
+System.out.println(response.body());
+```
+
+```java
+client.sendAsync(request, BodyHandlers.ofString())
+      .thenApply(response -> { System.out.println(response.statusCode());
+                               return response; } )
+      .thenApply(HttpResponse::body)
+      .thenAccept(System.out::println);
+```
+
+---
+
+#### HTTP/2
+
+- Java HTTP Client-ът поддържа както HTTP/1.1, така и HTTP/2
+- По подразбиране, клиентът праща заявките по HTTP/2
+- Заявките към сървъри, които не поддържат HTTP/2, автоматично се "downgrade"-ват до HTTP/1.1
+
+---
+
+## Въпроси
+
+@snap[south span-100]
+@fab[github] [fmi/java-course](https://github.com/fmi/java-course)
+@fab[youtube] [MJT2021](https://www.youtube.com/playlist?list=PLew34f6r0Pxy8PvaJ83pa4r76XCmZR657)
+@snapend
+
+
+## Design Patterns
+
+_13.01.2021_
+
+---
+
+#### Предната лекция говорихме за:
+
+@ul
+
+- HTTP
+- REST
+- JSON
+- `HttpClient`
+
+@ulend
+
+---
+
+#### `CompletableFuture<T>` под лупа
+
+<small>
+- `CompletableFuture<T>` е клас в пакета `java.util.concurrent`
+- имплементира интерфейсите `Future<T>` и `CompletionStage<T>`
+- позволява chain-ване на CompletableFutures, т.е. изпълнението им един след друг
+
+</small>
+
+```java
+// Връща нов CompletionStage, който ще се изпълни след дадения с резултата
+// му като аргумент на дадената функция
+<U> CompletionStage<U> thenApply​(Function<? super T,​? extends U> fn)
+
+// Връща нов CompletionStage, който ще се изпълни след дадения с резултата
+// му като аргумент на дадения action
+CompletableFuture<Void> thenAccept​(Consumer<? super T> action)
+
+// Блокира и изчаква завършването на операцията, и връща резултата ѝ
+T get()
+// Блокира и връща резултата след успешно приключване на операцията,
+// или хвърля uncheck exception при неуспех
+T join()
+```
+
+---
+
+#### Асинхронна обработка на заявки и резултата им
+
+<small>
+- `sendAsync()` изпраща заявката в отделна нишка (взима се от default-ния (common) thread executor на JVM-a или от custom executor-a, зададен при конструирането на `HttpClient`-a) и връща веднага инстанция на `CompletableFuture<HttpResponse>`
+- dependent методите на този `CompletableFuture` (`thenApply()`, `theAccept()`, ...) се изпъляват в отделна нишка
+  - ако са няколко chained, chain-ът се изпълява от една нишка
+  - ако държим chained метод да се изпълни в различна нишка, асинхронно спрямо останалия chain, може да ползваме async вариантите на dependent методите: `thenApplyAsync()`, `thenAcceptAsync()`
+  - ако искаме да се изпълнят не само в различна нишка, но и тази нишка да е от избран от нас thread pool, трябва да ползваме overloaded вариантите им, които приемат `executor`
+
+</small>
+
+---
+
+#### Днес ще разгледаме:
+
+@ul
+
+- S.O.L.I.D. дизайн принципите
+- Design Patterns
+
+@ulend
+
+---
+
+#### S.O.L.I.D дизайн принципи
+
+![S.O.L.I.D.](images/12.1-solid.png)
+
+---
+
+#### S.O.L.I.D: Single responsibility principle
+
+@ul
+
+- A class should have only a single responsibility (i.e. changes to only one part of the software's specification should be able to affect the specification of the class)
+- "A class should have only one reason to change."
+
+@ulend
+
+---
+
+#### S.O.L.I.D: Open/closed principle
+
+@ul
+
+- software entities (classes, modules, functions, etc.) should be open for extension, but closed for modification
+
+@ulend
+
+---
+
+#### S.O.L.I.D: Liskov substitution principle
+
+@ul
+
+- objects in a program should be replaceable with instances of their subtypes without altering the correctness of that program
+
+@ulend
+
+---
+
+#### S.O.L.I.D: Interface segregation principle
+
+@ul
+
+- A client should not be forced to implement an interface that it doesn’t use
+- Many client-specific interfaces are better than one general-purpose interface
+
+@ulend
+
+---
+
+#### S.O.L.I.D: Dependency inversion principle
+
+@ul
+
+- high level modules must not depend on low level modules, but they should depend on abstractions
+- one should “depend upon abstractions, not concretions”
+
+@ulend
+
+---
+
+#### Design Patterns
+
+Шаблоните за дизайн са
+
+@ul
+
+- обобщени добри практики
+- стандартни решения на общи / често срещани проблеми
+
+@ulend
+
+---
+
+![Design Patterns](images/12.2-design-patterns.jpg)
+
+---
+
+#### Design Patterns - ползи
+
+@ul
+
+- Използване на колективния опит за софтуерно проектиране за доказани решения на често срещани проблеми
+- Поощряват reusability на кода, което води до по-качествен и лесен за поддръжка код
+- Обща терминология, която помага на програмистите да се разбират лесно
+
+@ulend
+
+---
+
+#### Design Patterns - видове
+
+@ul
+
+- Creational Patterns
+- Structural Patterns
+- Behavioral Patterns
+
+@ulend
+
+---
+
+#### Creational Patterns
+
+@ul
+
+- Осигуряват начин да се създават обекти на класове, скривайки логиката по създаването им (вместо да се инстанцират директно чрез оператора `new`)
+- Factory, Abstract Factory, Builder, Singleton, Prototype
+
+@ulend
+
+---
+
+#### Structural Patterns
+
+@ul
+
+- Осигуряват различни начини за създаване на по-сложни класове чрез наследяване и композиция на по-прости класове
+- Adapter, Composite, Proxy, Flyweight, Facade, Bridge, Decorator
+
+@ulend
+
+---
+
+#### Behavioral Patterns
+
+@ul
+
+- Свързани са с комуникацията между обекти
+- Template Method, Mediator, Chain of Responsibility, Observer, Strategy, Command, State, Visitor, Interpreter, Iterator, Memento
+
+@ulend
+
+---
+
+#### Factory
+
+![Factory](images/12.3-factory.png)
+
+---
+
+#### Factory
+
+@ul
+
+- creational pattern
+- създаваме обект без да expose-ваме логиката по създаването му на клиента
+- използва се, когато имаме родителски клас с няколко наследници и искаме да създаваме един от наследниците на родителския клас според подаден параметър
+- примери от JDK-то: `valueOf()` метода на wrapper класовете като `Boolean`, `Integer` и т.н., `of()` методите на `List`, `Set`, `Map`, `of()` метода на `Path`, `of()` метода на `Stream`
+
+
+@ulend
+
+---
+
+#### Factory
+
+![Factory](images/12.4-factory-demo-diagram.png)
+
+---
+
+#### Builder
+
+![Builder](images/12.5-builder.png)
+
+---
+
+#### Builder
+
+@ul
+
+- creational pattern
+- решава някои проблеми на Factory pattern-а за класове с много атрубути, от които много са optional
+- примери от JDK-то: `StringBuilder`, `StringBuffer`, `HttpClient`, `HttpRequest`
+
+@ulend
+
+---
+
+#### Builder - имплементация
+
+@ul
+
+- Създаваме `static` вложен клас и копираме всички параметри от външния клас в builder класа
+- builder класът трябва да има публичен конструктор с всички задължителни атрибути като параметри
+- setter методи за всички опционални параметри, които връщат същата builder инстанция
+- `build()` метод, който връща обекта (`this`)
+
+@ulend
+
+---
+
+#### Singleton
+
+![Singleton](images/12.6-singleton.png)
+
+---
+
+#### Singleton
+
+@ul
+
+- creational pattern
+- клас, от който може да съществува най-много една инстанция
+- имплементация
+  - `private` конструктор
+  - `private static` член-променлива от тип същия клас, която реферира единствената инстанция на класа
+  - `public static` метод, който връща инстанцията на класа
+
+@ulend
+
+---
+
+#### Singleton
+
+@ul
+
+- типични употреби: logging, caching, thread pools
+- В други design patterns (Factory, Builder, Facade, Prototype, …)
+
+@ulend
+
+---
+
+#### Flyweight
+
+![Flyweight](images/12.7-flyweight.png)
+
+---
+
+#### Flyweight
+
+@ul
+
+- structural pattern
+- позволява да се съберат повече обекти в наличната памет чрез споделяне на общите части на state-a между множество обекти
+- намалява memory footprint-а на програмата
+- може също да подобри бързодействието в приложения, където инстанцирането на обектите е скъпа операция
+
+@ulend
+
+---
+
+#### Flyweight
+
+@ul
+
+- flyweight обектите са immutable: всяка операция, която променя състоянието им трябва да се изпълнява от factory-то
+- примери от JDK-то: `String` с имплементацията на string pool-a, `Integer.valueOf(int)`, `Byte.valueOf(byte)` и подобните са останалите wrapper типове
+
+@ulend
+
+---
+
+#### Flyweight - имплементация
+
+@ul
+
+- интерфейс, който дефинира операциите, които клиентския код може да извършва върху flyweight обектите
+- една или повече конкретни имплементации на този интерфейс
+- factory, което отговаря за инстанциране и кеширане
+
+@ulend
+
+---
+
+#### Iterator
+
+![Iterator](images/12.8-iterator.png)
+
+---
+
+#### Iterator
+
+@ul
+
+- behavioral pattern
+- позволява последователното обхождане на поредица от обекти
+- примери от JDK-то: `java.util.Iterator` и обхождането на колекции
+
+@ulend
+
+---
+
+#### Iterator
+
+![Iterator](images/12.9-iterator-demo-diagram.png)
+
+---
+
+#### Command
+
+![Command](images/12.10-command.png)
+
+---
+
+#### Command
+
+@ul
+
+- behavioral pattern
+- използва се за имплементиране на loose coupling в модел тип заявка-отговор
+- пример от JDK-то: `java.lang.Runnable`
+
+@ulend
+
+---
+
+#### Command
+
+![Command](images/12.11-command-demo-diagram.png)
+
+---
+
+#### Observer
+
+![Observer](images/12.12-observer.png)
+
+---
+
+#### Observer
+
+@ul
+
+- behavioral pattern
+- удобен е, когато се интересуваме от състоянието на даден обект и искаме да бъдем нотифицирани, когато има промяна в състоянието
+- обектът, който наблюдава за промяна на състоянието на друг обект, се нарича *Observer*, а наблюдаваният обект се нарича *Subject*
+- пример от JDK-то: `java.util.Observer`, `java.util.Observable`
+
+@ulend
+
+---
+
+#### Observer
+
+![Observer](images/12.13-observer-demo-diagram.png)
+
+---
+
+#### Strategy
+
+![Strategy](images/12.14-strategy.png)
+
+---
+
+#### Strategy
+
+@ul
+
+- behavioral pattern
+- прилага се, когато имаме множество алгоритми за дадена задача и клиентът решава по време на изпълнение, коя имплементация на алгоритъм да се ползва
+- примери от JDK-to: `Collections.sort()`, който сортира по различен критерий/алгоритъм в зависимост от подадения `Comparator`
+
+@ulend
+
+---
+
+#### Design Patterns - примери с код
+
+@ul
+
+- може да разгледате приложените [code snippets](https://github.com/fmi/java-course/tree/master/12-design-patterns/snippets/design-patterns)
+- хубави обяснения и примери с псевдокод [Refactoring Guru: Design Patterns](https://refactoring.guru/design-patterns)
+- тук може да намерите информация и примери с код на Java за голям брой design patterns (не само 23-те от *Gang-of-Four*): [Java Design Patterns](https://github.com/iluwatar/java-design-patterns)
+
+@ulend
+
+---
+
+## Въпроси
+
+@snap[south span-100]
+@fab[github] [fmi/java-course](https://github.com/fmi/java-course)
+@fab[youtube] [MJT2021](https://www.youtube.com/playlist?list=PLew34f6r0Pxy8PvaJ83pa4r76XCmZR657)
+@snapend
+
+
+
 
